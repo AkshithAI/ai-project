@@ -6,6 +6,16 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import BitsAndBytesConfig
 from .models import tokenizer,model
 import torch
+import wandb
+
+run = wandb.init(
+    entity = "akshithmarepally-akai",
+        project = "ai-project",
+        config = {
+            "architecture" : "GPT",
+            "dataset" : "AkshithAI/amazon-support-mistral3b",
+        }
+)
 
 ds = load_dataset("AkshithAI/amazon-support-mistral3b")
 
@@ -86,6 +96,11 @@ trainer = Trainer(
 # Train
 trainer.train()
 
+# Save fine-tuned weights
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+artifact = wandb.Artifact("LoRA-adapters",type = "model")
 model.save_pretrained(OUTPUT_DIR)
+artifact.add_file(OUTPUT_DIR)
+run.log_artifact(artifact)
+run.finish()
 print("LoRA adapters saved to:", OUTPUT_DIR)
