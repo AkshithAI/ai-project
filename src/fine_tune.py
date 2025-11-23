@@ -4,7 +4,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments,
 from transformers import default_data_collator
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import BitsAndBytesConfig
-from .models import tokenizer,model
+from .models import tokenizer
 import torch
 import wandb
 
@@ -50,7 +50,12 @@ bnb_config = BitsAndBytesConfig(
     bnb_4bit_quant_type="nf4"
 )
 
-
+# In fine_tune.py
+model = AutoModelForCausalLM.from_pretrained(
+    "ministral/Ministral-3b-instruct", 
+    quantization_config=bnb_config,    
+    device_map="auto"
+)
 
 model = prepare_model_for_kbit_training(model)
 
@@ -100,7 +105,7 @@ trainer.train()
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 artifact = wandb.Artifact("LoRA-adapters",type = "model")
 model.save_pretrained(OUTPUT_DIR)
-artifact.add_file(OUTPUT_DIR)
+artifact.add_dir(OUTPUT_DIR)
 run.log_artifact(artifact)
 run.finish()
 print("LoRA adapters saved to:", OUTPUT_DIR)
