@@ -19,7 +19,7 @@ run = wandb.init(
 
 ds = load_dataset("AkshithAI/amazon-support-mistral3b")
 
-OUTPUT_DIR = "/Users/apple/Documents/ai-project/ckpts"
+OUTPUT_DIR = os.environ.get("CHECKPOINT_DIR", "./ckpts")
 NUM_EPOCHS = 3
 PER_DEVICE_BATCH_SIZE = 4  
 GRAD_ACCUM = 1
