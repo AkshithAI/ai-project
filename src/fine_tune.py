@@ -19,10 +19,15 @@ run = wandb.init(
 def get_base_dir():
     if os.environ.get("CHECKPOINT_DIR"):
         CHECKPOINT_DIR = os.environ.get("CHECKPOINT_DIR")
+        # Ensure the directory variable used for makedirs is defined
+        project_828_dir = CHECKPOINT_DIR
     else:
         home_dir = os.path.expanduser("~")
         cache_dir = os.path.join(home_dir,".cache")
         project_828_dir = os.path.join(cache_dir,"fine-tuned_weights")
+        # Ensure the return variable is defined
+        CHECKPOINT_DIR = project_828_dir
+        
     os.makedirs(project_828_dir,exist_ok=True)
     return CHECKPOINT_DIR
 CHECKPOINT_DIR = get_base_dir()
