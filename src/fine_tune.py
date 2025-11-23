@@ -1,39 +1,35 @@
 import os
-from datasets import load_from_disk,load_dataset
-from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
-from transformers import default_data_collator
+from datasets import load_dataset
+from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer, DataCollatorForLanguageModeling
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import BitsAndBytesConfig
-from .models import tokenizer
 import torch
 import wandb
 
 run = wandb.init(
-    entity = "akshithmarepally-akai",
-        project = "ai-project",
-        config = {
-            "architecture" : "GPT",
-            "dataset" : "AkshithAI/amazon-support-mistral3b",
-        }
+    entity="akshithmarepally-akai",
+    project="ai-project",
+    config={
+        "architecture": "GPT",
+        "dataset": "AkshithAI/amazon-support-mistral3b",
+    }
 )
+
 def get_base_dir():
     if os.environ.get("CHECKPOINT_DIR"):
-        CHECKPOINT_DIR = os.environ.get("CHECKPOINT_DIR")
-        # Ensure the directory variable used for makedirs is defined
-        project_828_dir = CHECKPOINT_DIR
+        return os.environ.get("CHECKPOINT_DIR")
     else:
         home_dir = os.path.expanduser("~")
-        cache_dir = os.path.join(home_dir,".cache")
-        project_828_dir = os.path.join(cache_dir,"fine-tuned_weights")
-        # Ensure the return variable is defined
-        CHECKPOINT_DIR = project_828_dir
-        
-    os.makedirs(project_828_dir,exist_ok=True)
-    return CHECKPOINT_DIR
+        cache_dir = os.path.join(home_dir, ".cache")
+        return os.path.join(cache_dir, "fine-tuned_weights")
+
 CHECKPOINT_DIR = get_base_dir()
+
+
+OUTPUT_DIR = os.environ.get("OUTPUT_DIR", CHECKPOINT_DIR)
+
 ds = load_dataset("AkshithAI/amazon-support-mistral3b")
 
-OUTPUT_DIR = os.environ.get(CHECKPOINT_DIR, "./ckpts")
 NUM_EPOCHS = 3
 PER_DEVICE_BATCH_SIZE = 4  
 GRAD_ACCUM = 1
@@ -42,21 +38,22 @@ MAX_STEPS = -1
 SAVE_STRATEGY = "epoch"
 LOGGING_STEPS = 50
 SEED = 42
+
 # LoRA specific
 LORA_R = 16
 LORA_ALPHA = 32
 LORA_DROPOUT = 0.05
 TARGET_MODULES = ["q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj"]
 
-
 train_ds = ds["train"]
 eval_ds = None
 
-# Tokenizer
+model_id = "ministral/Ministral-3b-instruct"
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+
 if tokenizer.pad_token_id is None:
     tokenizer.pad_token = tokenizer.eos_token
 
-# bitsandbytes config for 4-bit load (QLoRA)
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_compute_dtype=torch.float16,
@@ -64,9 +61,8 @@ bnb_config = BitsAndBytesConfig(
     bnb_4bit_quant_type="nf4"
 )
 
-# In fine_tune.py
 model = AutoModelForCausalLM.from_pretrained(
-    "ministral/Ministral-3b-instruct", 
+    model_id, 
     quantization_config=bnb_config,    
     device_map="auto"
 )
@@ -86,7 +82,7 @@ model.print_trainable_parameters()
 
 # Training args
 training_args = TrainingArguments(
-    output_dir="./qllora_run",
+    output_dir=OUTPUT_DIR, 
     per_device_train_batch_size=PER_DEVICE_BATCH_SIZE,
     per_device_eval_batch_size=PER_DEVICE_BATCH_SIZE,
     gradient_accumulation_steps=GRAD_ACCUM,
@@ -99,10 +95,10 @@ training_args = TrainingArguments(
     evaluation_strategy="epoch" if eval_ds is not None else "no",
     save_total_limit=3,
     remove_unused_columns=False,
-    report_to="none",
+    report_to="wandb", 
 )
 
-data_collator = default_data_collator
+data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
 trainer = Trainer(
     model=model,
@@ -117,8 +113,9 @@ trainer.train()
 
 # Save fine-tuned weights
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-artifact = wandb.Artifact("LoRA-adapters",type = "model")
+artifact = wandb.Artifact("LoRA-adapters", type="model")
 model.save_pretrained(OUTPUT_DIR)
+tokenizer.save_pretrained(OUTPUT_DIR) 
 artifact.add_dir(OUTPUT_DIR)
 run.log_artifact(artifact)
 run.finish()
