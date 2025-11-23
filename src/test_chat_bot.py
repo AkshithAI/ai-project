@@ -4,7 +4,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import PeftModel
 from .models import tokenizer
 
-BASE_MODEL = "mistralai/Mistral-3B-Instruct"
+BASE_MODEL = "ministral/Ministral-3b-instruct"
 ADAPTER_PATH = os.environ.get("CHECKPOINT_DIR", "./ckpts")  
 
 if tokenizer.pad_token_id is None:
