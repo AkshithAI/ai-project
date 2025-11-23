@@ -16,10 +16,19 @@ run = wandb.init(
             "dataset" : "AkshithAI/amazon-support-mistral3b",
         }
 )
-
+def get_base_dir():
+    if os.environ.get("CHECKPOINT_DIR"):
+        CHECKPOINT_DIR = os.environ.get("CHECKPOINT_DIR")
+    else:
+        home_dir = os.path.expanduser("~")
+        cache_dir = os.path.join(home_dir,".cache")
+        project_828_dir = os.path.join(cache_dir,"fine-tuned_weights")
+    os.makedirs(project_828_dir,exist_ok=True)
+    return CHECKPOINT_DIR
+CHECKPOINT_DIR = get_base_dir()
 ds = load_dataset("AkshithAI/amazon-support-mistral3b")
 
-OUTPUT_DIR = os.environ.get("CHECKPOINT_DIR", "./ckpts")
+OUTPUT_DIR = os.environ.get(CHECKPOINT_DIR, "./ckpts")
 NUM_EPOCHS = 3
 PER_DEVICE_BATCH_SIZE = 4  
 GRAD_ACCUM = 1
