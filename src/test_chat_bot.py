@@ -1,10 +1,11 @@
+import os
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import PeftModel
 from .models import tokenizer
 
-BASE_MODEL = "mistralai/Mistral-3B-Instruct"
-ADAPTER_PATH = "/Users/apple/Documents/ai-project/ckpts"  
+BASE_MODEL = "ministral/Ministral-3b-instruct"
+ADAPTER_PATH = os.environ.get("CHECKPOINT_DIR", "./ckpts")  
 
 if tokenizer.pad_token_id is None:
     tokenizer.pad_token = tokenizer.eos_token
