@@ -6,6 +6,10 @@ from transformers import BitsAndBytesConfig
 import torch
 import wandb
 
+# Attempt to clear cache before starting
+torch.cuda.empty_cache()
+
+# Initialize wandb
 run = wandb.init(
     entity="akshithmarepally-akai",
     project="ai-project",
@@ -24,20 +28,21 @@ def get_base_dir():
         return os.path.join(cache_dir, "fine-tuned_weights")
 
 CHECKPOINT_DIR = get_base_dir()
-
-
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", CHECKPOINT_DIR)
 
-ds = load_dataset("AkshithAI/amazon-support-mistral3b")
-
-NUM_EPOCHS = 3
-PER_DEVICE_BATCH_SIZE = 4  
-GRAD_ACCUM = 1
-LEARNING_RATE = 3e-4
-MAX_STEPS = -1             
-SAVE_STRATEGY = "epoch"
-LOGGING_STEPS = 50
+# --- STABLE HYPERPARAMETERS ---
+NUM_EPOCHS = 1
+# Reduced batch size to 8 to fit comfortably in memory
+PER_DEVICE_BATCH_SIZE = 8  
+# Increased accumulation to 8 to keep effective batch size at 64 (8 * 8)
+GRAD_ACCUM = 8              
+LEARNING_RATE = 2e-4
+MAX_STEPS = 1000            
+SAVE_STRATEGY = "steps"
+SAVE_STEPS = 200
+LOGGING_STEPS = 10
 SEED = 42
+MAX_SEQ_LENGTH = 512
 
 # LoRA specific
 LORA_R = 16
@@ -45,26 +50,56 @@ LORA_ALPHA = 32
 LORA_DROPOUT = 0.05
 TARGET_MODULES = ["q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj"]
 
-train_ds = ds["train"]
-eval_ds = None
-
+# Load Tokenizer
 model_id = "ministral/Ministral-3b-instruct"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 
 if tokenizer.pad_token_id is None:
     tokenizer.pad_token = tokenizer.eos_token
+tokenizer.padding_side = "right"
 
+# Load and Process Dataset
+ds = load_dataset("AkshithAI/amazon-support-mistral3b")
+
+def process_data(samples):
+    text_column = "text"
+    if "text" not in samples and "content" in samples:
+        text_column = "content"
+    elif "text" not in samples and "prompt" in samples and "response" in samples:
+        return tokenizer([p + " " + r for p, r in zip(samples["prompt"], samples["response"])], 
+                         truncation=True, max_length=MAX_SEQ_LENGTH)
+
+    if text_column in samples:
+        return tokenizer(samples[text_column], truncation=True, max_length=MAX_SEQ_LENGTH)
+    else:
+        if "input_ids" in samples:
+             return {"input_ids": [x[:MAX_SEQ_LENGTH] for x in samples["input_ids"]],
+                     "attention_mask": [x[:MAX_SEQ_LENGTH] for x in samples["attention_mask"]]}
+        raise ValueError(f"Could not find text column in dataset. Columns: {list(samples.keys())}")
+
+tokenized_ds = ds.map(
+    process_data,
+    batched=True,
+    remove_columns=ds["train"].column_names,
+    desc="Tokenizing dataset"
+)
+
+train_ds = tokenized_ds["train"]
+eval_ds = None
+
+# bitsandbytes config for 4-bit load (QLoRA)
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
-    bnb_4bit_compute_dtype=torch.float16,
+    bnb_4bit_compute_dtype=torch.bfloat16,
     bnb_4bit_use_double_quant=True,
     bnb_4bit_quant_type="nf4"
 )
 
 model = AutoModelForCausalLM.from_pretrained(
-    model_id, 
-    quantization_config=bnb_config,    
-    device_map="auto"
+    model_id,
+    quantization_config=bnb_config,
+    device_map="auto",
+    attn_implementation="sdpa"
 )
 
 model = prepare_model_for_kbit_training(model)
@@ -82,20 +117,22 @@ model.print_trainable_parameters()
 
 # Training args
 training_args = TrainingArguments(
-    output_dir=OUTPUT_DIR, 
+    output_dir=OUTPUT_DIR,
     per_device_train_batch_size=PER_DEVICE_BATCH_SIZE,
     per_device_eval_batch_size=PER_DEVICE_BATCH_SIZE,
     gradient_accumulation_steps=GRAD_ACCUM,
-    num_train_epochs=NUM_EPOCHS if MAX_STEPS<=0 else 999999,
-    max_steps=MAX_STEPS if MAX_STEPS>0 else -1,
+    max_steps=MAX_STEPS,
     learning_rate=LEARNING_RATE,
-    fp16=True,
+    bf16=True,
+    fp16=False,
     logging_steps=LOGGING_STEPS,
     save_strategy=SAVE_STRATEGY,
-    evaluation_strategy="epoch" if eval_ds is not None else "no",
+    save_steps=SAVE_STEPS,
+    eval_strategy="no",
     save_total_limit=3,
     remove_unused_columns=False,
-    report_to="wandb", 
+    report_to="wandb",
+    dataloader_num_workers=4
 )
 
 data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
@@ -115,7 +152,7 @@ trainer.train()
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 artifact = wandb.Artifact("LoRA-adapters", type="model")
 model.save_pretrained(OUTPUT_DIR)
-tokenizer.save_pretrained(OUTPUT_DIR) 
+tokenizer.save_pretrained(OUTPUT_DIR)
 artifact.add_dir(OUTPUT_DIR)
 run.log_artifact(artifact)
 run.finish()
